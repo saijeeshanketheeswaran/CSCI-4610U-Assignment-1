@@ -311,12 +311,12 @@ def build_graph(elevs):
                 el = elevs[erow * EPIX + ecol]
             except IndexError:
                 el = 0
-            nodes[(long)(item.get('id'))] = Node((long)(item.get('id')), coords, el)
+            nodes[(int)(item.get('id'))] = Node((int)(item.get('id')), coords, el)
         elif item.tag == 'way':
             if item.get('id') == '157161112':  # main coastline way ID
                 for thing in item:
                     if thing.tag == 'nd':
-                        coastnodes.append((long)(thing.get('ref')))
+                        coastnodes.append((int)(thing.get('ref')))
                 continue
             useme = False
             oneway = False
@@ -331,12 +331,12 @@ def build_graph(elevs):
                     if thing.get('v') == 'yes':
                         oneway = True
             if useme:
-                wayid = (long)(item.get('id'))
+                wayid = (item.get('id'))
                 ways[wayid] = Way(myname, mytype)
                 nlist = []
                 for thing in item:
                     if thing.tag == 'nd':
-                        nlist.append((long)(thing.get('ref')))
+                        nlist.append((int)(thing.get('ref')))
                 thisn = nlist[0]
                 for n in range(len(nlist) - 1):
                     nextn = nlist[n + 1]
