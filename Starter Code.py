@@ -13,10 +13,10 @@ from queue import *
 import math
 
 # bounds of the window, in lat/long
-LEFTLON = -78.9425000  # 18.055
-RIGHTLON = -78.8236000  # 18.125
-TOPLAT = 43.9682000  # 42.675
-BOTLAT = 43.9237000  # 42.635
+LEFTLON = -78.8685000  # 18.055
+RIGHTLON = -78.8150000  # 18.125
+TOPLAT = 43.9262000  # 42.675
+BOTLAT = 43.9066000  # 42.635
 WIDTH = RIGHTLON - LEFTLON
 HEIGHT = TOPLAT - BOTLAT
 # ratio of one degree of longitude to one degree of latitude
@@ -49,7 +49,7 @@ def pythag(a, b):
 
 class Node():
     ''' Graph (map) node, not a search node! '''
-    __slots__ = ('id', 'pos', 'ways', 'elev', 'waystr')
+    __slots__ = ('id', 'pos', 'ways', 'elev', 'waystr', 'wayset')
 
     def __init__(self, id, p, e=0):
         self.id = id
@@ -371,8 +371,7 @@ def build_graph(elevs):
         print(nodes[coastnodes[0]])
     return nodes, ways, coastnodes
 
-
-elevs = build_elevs("n43_w079_1arc_v2_bil/n43_w079_1arc_v2.bil")
+elevs = build_elevs("n41_w114_1arc_v2_bil/n41_w114_1arc_v2.bil")
 nodes, ways, coastnodes = build_graph(elevs)
 # nodes, ways = build_graph(elevs)
 
