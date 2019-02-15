@@ -1,13 +1,8 @@
 '''
- A*, path planner solution
-
-
- note xml includes all nodes for all partially-present ways
- uses a bounding box to ignore nodes outside the region, should be safe
+A* search
 
  Saijeeshan Ketheeswaran, Abinash Narendiran, Rohil Arya
 '''
-
 from tkinter import *
 import struct
 import xml.etree.ElementTree as ET
