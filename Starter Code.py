@@ -4,6 +4,8 @@
 
  note xml includes all nodes for all partially-present ways
  uses a bounding box to ignore nodes outside the region, should be safe
+
+ Saijeeshan Ketheeswaran, Abinash Narendiran, Rohil Arya
 '''
 
 from tkinter import *
@@ -12,87 +14,84 @@ import xml.etree.ElementTree as ET
 from queue import *
 import math
 
-# bounds of the window, in lat/long
-LEFTLON = -78.8685000  # 18.055
-RIGHTLON = -78.8150000  # 18.125
-TOPLAT = 43.9262000  # 42.675
-BOTLAT = 43.9066000  # 42.635
-WIDTH = RIGHTLON - LEFTLON
-HEIGHT = TOPLAT - BOTLAT
-# ratio of one degree of longitude to one degree of latitude
-LONRATIO = math.cos(TOPLAT * 3.1415 / 180)
-WINWID = 1000
-WINHGT = (int)((WINWID / LONRATIO) * HEIGHT / WIDTH)
-TOXPIX = WINWID / WIDTH
-TOYPIX = WINHGT / HEIGHT
+MINLON = -78.8685000
+MAXLON = -78.8150000
+MAXLAT = 43.9262000
+MINLAT = 43.9066000
+
+WIDTH = MAXLON - MINLON
+HEIGHT = MAXLAT - MINLAT
+
+LONRAT = math.cos(MAXLAT * 3.1415 / 180)
+
+WINWIDTH = 1000
+WINHEIGHT = (int)((WINWIDTH / LONRAT) * HEIGHT / WIDTH)
+
+XPIX = WINWIDTH / WIDTH
+YPIX = WINHEIGHT / HEIGHT
+
 # width,height of elevation array
-EPIX = 3601
-# approximate number of meters per degree of latitude
-MPERLAT = 111000
-MPERLON = MPERLAT * LONRATIO
+elev_pix = 3601
+
+# some constants about the earth
+MPERLAT = 111000 # meters per degree of latitude, approximately
+MPERLON = MPERLAT * LONRAT # meters per degree longitude
+
+def n_distance(n1, n2):
+    dist_x = (n2.position[0] - n1.position[0]) * MPERLON
+    dist_y = (n2.position[1] - n1.position[1]) * MPERLAT
+    return math.sqrt(dist_x * dist_x + dist_y * dist_y)
 
 
-def node_dist(n1, n2):
-    ''' Distance between nodes n1 and n2, in meters. '''
-    dx = (n2.pos[0] - n1.pos[0]) * MPERLON
-    dy = (n2.pos[1] - n1.pos[1]) * MPERLAT
-    return math.sqrt(dx * dx + dy * dy)  # in meters
-
-
-def elev_dist(n1, n2):
-    return n2.elev - n1.elev
-
-
-def pythag(a, b):
-    return math.sqrt(a ** 2 + b ** 2)
+def elev_distance(n1, n2):
+    return n2.elevation - n1.elevation
 
 
 class Node():
-    ''' Graph (map) node, not a search node! '''
-    __slots__ = ('id', 'pos', 'ways', 'elev', 'waystr', 'wayset')
+    __slots__ = ('id', 'position', 'ways', 'elevation', 'str_way', 'set_way')
 
-    def __init__(self, id, p, e=0):
+    def __init__(self, id, pos, elev=0):
         self.id = id
-        self.waystr = None
-        self.pos = p
+        self.str_way = None
+        self.position = pos
         self.ways = []
-        self.elev = e
+        self.elevation = elev
 
     def __str__(self):
-        if self.waystr is None:
-            self.waystr = self.get_waystr()
-        return str(self.pos) + ": " + self.waystr
+        if self.str_way is None:
+            self.str_way = self.get_waystr()
+
+        return str(self.position) + ": " + self.str_way
 
     def get_waystr(self):
-        if self.waystr is None:
-            self.waystr = ""
-            self.wayset = set()
+        if self.str_way is None:
+            self.str_way = ""
+            self.set_way = set()
+
             for w in self.ways:
-                self.wayset.add(w.way.name)
-            for w in self.wayset:
-                self.waystr += w.encode("utf-8") + " "
-        return self.waystr
+                self.set_way.add(w.way.name)
+
+        return self.str_way
 
 
 class Edge():
-    ''' Graph (map) edge. Includes cost computation.'''
-    __slots__ = ('way', 'dest', 'cost')
+    __slots__ = ('way', 'destination', 'cost')
 
-    def __init__(self, w, src, d):
+    def __init__(self, w, src, dest):
         self.way = w
-        self.dest = d
-        self.cost = node_dist(src, d)
-        if d.elev > src.elev:
-            self.cost += (d.elev - src.elev) * 2
+        self.destination = dest
+        self.cost = n_distance(src, dest)
+
+        if dest.elevation > src.elevation:
+            self.cost += (dest.elevation - src.elevation) * 2
+
             if self.way.type == 'steps':
                 self.cost *= 1.5
 
 
 class Way():
-    ''' A way is an entire street, for drawing, not searching. '''
     __slots__ = ('name', 'type', 'nodes')
 
-    # nodes here for ease of drawing only
     def __init__(self, n, t):
         self.name = n
         self.type = t
@@ -106,177 +105,200 @@ class Planner():
         self.nodes = n
         self.ways = w
 
-    def heur(self, node, gnode):
-        '''
-        Heuristic function is just straight-line (flat) distance.
-        Since the actual cost only adds to this distance, this is admissible.
-        '''
-        return pythag(elev_dist(node, gnode), node_dist(node, gnode))
-        # return node_dist(node,gnode)
+    def heuristic(self, node, gnode):
+
+        return math.sqrt(elev_distance(node, gnode)**2 + n_distance(node, gnode)**2)
 
     def plan(self, s, g):
-        '''
-        Standard A* search
-        '''
+
         parents = {}
         costs = {}
-        q = PriorityQueue()
-        q.put((self.heur(s, g), s))
+
+        queue = PriorityQueue()
+        queue.put((self.heuristic(s, g), s))
+
         parents[s] = None
         costs[s] = 0
-        while not q.empty():
-            cf, cnode = q.get()
+
+        while not queue.empty():
+            cf, cnode = queue.get()
+
             if cnode == g:
-                print("Path found, time will be", costs[g] * 60 / 5000)  # 5 km/hr on flat
+                print("Found a path, and time is ", costs[g] * 60 / 5000, "\n")
                 return self.make_path(parents, g)
+
             for edge in cnode.ways:
-                newcost = costs[cnode] + edge.cost
-                if edge.dest not in parents or newcost < costs[edge.dest]:
-                    parents[edge.dest] = (cnode, edge.way)
-                    costs[edge.dest] = newcost
-                    q.put((self.heur(edge.dest, g) + newcost, edge.dest))
+                new_cost = costs[cnode] + edge.cost
+
+                if edge.destination not in parents or new_cost < costs[edge.destination]:
+                    parents[edge.destination] = (cnode, edge.way)
+                    costs[edge.destination] = new_cost
+                    queue.put((self.heuristic(edge.destination, g) + new_cost, edge.destination))
 
     def make_path(self, par, g):
         nodes = []
         ways = []
-        curr = g
-        nodes.append(curr)
-        while par[curr] is not None:
-            prev, way = par[curr]
+        current = g
+        nodes.append(current)
+
+        while par[current] is not None:
+            previous, way = par[current]
             ways.append(way.name)
-            nodes.append(prev)
-            curr = prev
+            nodes.append(previous)
+            current = previous
+
         nodes.reverse()
         ways.reverse()
+
         return nodes, ways
 
 
 class PlanWin(Frame):
-    '''
-    All the GUI pieces to draw the streets, allow places to be selected,
-    and then draw the resulting path.
-    '''
 
-    __slots__ = ('whatis', 'nodes', 'ways', 'elevs', 'nodelab', 'elab', 'planner', 'lastnode', 'startnode', 'goalnode')
+    __slots__ = ('whatis', 'nodes', 'ways', 'elevs', 'nodelab', 'elab', 'planner', 'lastnode', 'start_node', 'target_node')
 
-    def lat_lon_to_pix(self, latlon):
-        x = (latlon[1] - LEFTLON) * (TOXPIX)
-        y = (TOPLAT - latlon[0]) * (TOYPIX)
+    def lat_lon_to_pix(self, lat_long):
+
+        x = (lat_long[1] - MINLON) * (XPIX)
+        y = (MAXLAT - lat_long[0]) * (YPIX)
+
         return x, y
 
     def pix_to_elev(self, x, y):
-        return self.lat_lon_to_elev(((TOPLAT - (y / TOYPIX)), ((x / TOXPIX) + LEFTLON)))
 
-    def lat_lon_to_elev(self, latlon):
-        # row is 0 for 43N, 1201 (EPIX) for 42N
-        row = (int)((43.9682000 - latlon[0]) * EPIX)
-        # col is 0 for 18 E, 1201 for 19 E
-        col = (int)((latlon[1] - 78.9425000) * EPIX)
-        return self.elevs[row * EPIX + col]
+        return self.lat_lon_to_elev(((MAXLAT - (y / YPIX)), ((x / XPIX) + MINLON)))
 
-    def maphover(self, event):
+    def lat_lon_to_elev(self, lat_long):
+
+        row = (int)((43.9682000 - lat_long[0]) * elev_pix)
+        col = (int)((lat_long[1] - 78.9425000) * elev_pix)
+
+        return self.elevs[row * elev_pix + col]
+
+    def hover_map(self, event):
+
         self.elab.configure(text=str(self.pix_to_elev(event.x, event.y)))
-        for (dx, dy) in [(0, 0), (-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
-            ckpos = (event.x + dx, event.y + dy)
+
+        for (dist_x, dist_y) in [(0, 0), (-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+
+            ckpos = (event.x + dist_x, event.y + dist_y)
+
             if ckpos in self.whatis:
+
                 self.lastnode = self.whatis[ckpos]
-                lnpos = self.lat_lon_to_pix(self.nodes[self.lastnode].pos)
+                lnpos = self.lat_lon_to_pix(self.nodes[self.lastnode].position)
                 self.canvas.coords('lastdot', (lnpos[0] - 2, lnpos[1] - 2, lnpos[0] + 2, lnpos[1] + 2))
                 nstr = str(self.lastnode)
                 nstr += " "
                 nstr += str(self.nodes[self.whatis[ckpos]].get_waystr())
                 self.nodelab.configure(text=nstr)
+
                 return
 
     def mapclick(self, event):
-        ''' Canvas click handler:
-        First click sets path start, second sets path goal
-        '''
-        print("Clicked on " + str(event.x) + "," + str(event.y) + " last node " + str(self.lastnode))
         if self.lastnode is None:
             return
-        if self.startnode is None:
-            self.startnode = self.nodes[self.lastnode]
-            self.snpix = self.lat_lon_to_pix(self.startnode.pos)
-            self.canvas.coords('startdot', (self.snpix[0] - 2, self.snpix[1] - 2, self.snpix[0] + 2, self.snpix[1] + 2))
-        elif self.goalnode is None:
-            self.goalnode = self.nodes[self.lastnode]
-            self.snpix = self.lat_lon_to_pix(self.goalnode.pos)
-            self.canvas.coords('goaldot', (self.snpix[0] - 2, self.snpix[1] - 2, self.snpix[0] + 2, self.snpix[1] + 2))
+
+        if self.start_node is None:
+            self.start_node = self.nodes[self.lastnode]
+            self.snpix = self.lat_lon_to_pix(self.start_node.position)
+            self.canvas.coords('greendot', (self.snpix[0] - 2, self.snpix[1] - 2, self.snpix[0] + 2, self.snpix[1] + 2))
+
+        elif self.target_node is None:
+            self.target_node = self.nodes[self.lastnode]
+            self.snpix = self.lat_lon_to_pix(self.target_node.position)
+            self.canvas.coords('reddot', (self.snpix[0] - 2, self.snpix[1] - 2, self.snpix[0] + 2, self.snpix[1] + 2))
 
     def clear(self):
         ''' Clear button callback. '''
         self.lastnode = None
-        self.goalnode = None
-        self.startnode = None
-        self.canvas.coords('startdot', (0, 0, 0, 0))
-        self.canvas.coords('goaldot', (0, 0, 0, 0))
+        self.target_node = None
+        self.start_node = None
+        self.canvas.coords('greendot', (0, 0, 0, 0))
+        self.canvas.coords('reddot', (0, 0, 0, 0))
         self.canvas.coords('path', (0, 0, 0, 0))
 
     def plan_path(self):
-        ''' Path button callback, plans and then draws path.'''
-        print("Planning!")
-        if self.startnode is None or self.goalnode is None:
+
+        print("Planning a path... \n")
+
+        if self.start_node is None or self.target_node is None:
+
             print("Sorry, not enough info.")
+
             return
-        print("From", self.startnode.id, "to", self.goalnode.id)
-        nodes, ways = self.planner.plan(self.startnode, self.goalnode)
-        lastway = ""
-        for wayname in ways:
-            if wayname != lastway:
-                print(wayname)
-                lastway = wayname
+
+        print("From start node", self.start_node.id, "to target node", self.target_node.id, "\n")
+
+        nodes, ways = self.planner.plan(self.start_node, self.target_node)
+        prev_way = ""
+
+        for name_of_way in ways:
+
+            if name_of_way != prev_way:
+                print(name_of_way)
+                prev_way = name_of_way
+
         coords = []
+
         for node in nodes:
-            npos = self.lat_lon_to_pix(node.pos)
-            coords.append(npos[0])
-            coords.append(npos[1])
-            # print node.id
+
+            num_pos = self.lat_lon_to_pix(node.position)
+            coords.append(num_pos[0])
+            coords.append(num_pos[1])
+
         self.canvas.coords('path', *coords)
 
-    def __init__(self, master, nodes, ways, coastnodes, elevs):
+    def __init__(self, master, nodes, ways, coast_nodes, elevs):
         self.whatis = {}
         self.nodes = nodes
         self.ways = ways
         self.elevs = elevs
-        self.startnode = None
-        self.goalnode = None
+        self.start_node = None
+        self.target_node = None
         self.planner = Planner(nodes, ways)
+
         thewin = Frame(master)
-        w = Canvas(thewin, width=WINWID, height=WINHGT)  # , cursor="crosshair")
+
+        w = Canvas(thewin, width = WINWIDTH, height = WINHEIGHT)
         w.bind("<Button-1>", self.mapclick)
-        w.bind("<Motion>", self.maphover)
+        w.bind("<Motion>", self.hover_map)
+
         for waynum in self.ways:
-            nlist = self.ways[waynum].nodes
-            thispix = self.lat_lon_to_pix(self.nodes[nlist[0]].pos)
-            if len(self.nodes[nlist[0]].ways) > 2:
-                self.whatis[((int)(thispix[0]), (int)(thispix[1]))] = nlist[0]
-            for n in range(len(nlist) - 1):
-                nextpix = self.lat_lon_to_pix(self.nodes[nlist[n + 1]].pos)
-                self.whatis[((int)(nextpix[0]), (int)(nextpix[1]))] = nlist[n + 1]
+            node_list = self.ways[waynum].nodes
+            thispix = self.lat_lon_to_pix(self.nodes[node_list[0]].position)
+
+            if len(self.nodes[node_list[0]].ways) > 2:
+                self.whatis[((int)(thispix[0]), (int)(thispix[1]))] = node_list[0]
+
+            for n in range(len(node_list) - 1):
+                nextpix = self.lat_lon_to_pix(self.nodes[node_list[n + 1]].position)
+                self.whatis[((int)(nextpix[0]), (int)(nextpix[1]))] = node_list[n + 1]
                 w.create_line(thispix[0], thispix[1], nextpix[0], nextpix[1])
                 thispix = nextpix
-        if len(coastnodes):
-            thispix = self.lat_lon_to_pix(self.nodes[coastnodes[0]].pos)
-        # also draw the coast:
-        for n in range(len(coastnodes) - 1):
-            nextpix = self.lat_lon_to_pix(self.nodes[coastnodes[n + 1]].pos)
+
+        if len(coast_nodes):
+            thispix = self.lat_lon_to_pix(self.nodes[coast_nodes[0]].position)
+
+        for n in range(len(coast_nodes) - 1):
+            nextpix = self.lat_lon_to_pix(self.nodes[coast_nodes[n + 1]].position)
             w.create_line(thispix[0], thispix[1], nextpix[0], nextpix[1], fill="blue")
             thispix = nextpix
 
-        # other visible things are hiding for now...
-        w.create_line(0, 0, 0, 0, fill='orange', width=3, tag='path')
+        w.create_line(0, 0, 0, 0, fill='yellow', width=3, tag='path')
 
-        w.create_oval(0, 0, 0, 0, outline='green', fill='green', tag='startdot')
-        w.create_oval(0, 0, 0, 0, outline='red', fill='red', tag='goaldot')
+        w.create_oval(0, 0, 0, 0, outline='green', fill='green', tag='greendot')
+        w.create_oval(0, 0, 0, 0, outline='red', fill='red', tag='reddot')
         w.create_oval(0, 0, 0, 0, outline='blue', fill='blue', tag='lastdot')
+
         w.pack(fill=BOTH)
+
         self.canvas = w
 
-        cb = Button(thewin, text="Clear", command=self.clear)
+        cb = Button(thewin, text="Clear Plan", command=self.clear)
         cb.pack(side=RIGHT, pady=5)
 
-        sb = Button(thewin, text="Plan!", command=self.plan_path)
+        sb = Button(thewin, text="Show Plan", command=self.plan_path)
         sb.pack(side=RIGHT, pady=5)
 
         nodelablab = Label(thewin, text="Node:")
@@ -285,7 +307,7 @@ class PlanWin(Frame):
         self.nodelab = Label(thewin, text="None")
         self.nodelab.pack(side=LEFT, padx=5)
 
-        elablab = Label(thewin, text="Elev:")
+        elablab = Label(thewin, text="Elevation:")
         elablab.pack(side=LEFT, padx=5)
 
         self.elab = Label(thewin, text="0")
@@ -294,20 +316,20 @@ class PlanWin(Frame):
         thewin.pack()
 
 
-def build_elevs(efilename):
-    ''' read in elevations from a file. '''
+def read_elevations(efilename):
+
     efile = open(efilename, "rb")
     estr = efile.read()
     elevs = []
+
     for spot in range(0, len(estr), 2):
-        # elevs.append(struct.unpack('<H',estr[spot:spot+2])[0])
+
         elevs.append(struct.unpack('<h', estr[spot:spot + 2])[0])
 
-    # print elevs
     return elevs
 
 
-def build_graph(elevs):
+def read_xml(elevs):
     ''' Build the search graph from the OpenStreetMap XML. '''
     tree = ET.parse('Oshawa.osm')
     root = tree.getroot()
@@ -315,66 +337,86 @@ def build_graph(elevs):
     nodes = dict()
     ways = dict()
     waytypes = set()
-    coastnodes = []
+    coast_nodes = []
+
     for item in root:
+
         if item.tag == 'node':
             coords = ((float)(item.get('lat')), (float)(item.get('lon')))
-            # row is 0 for 43N, 1201 (EPIX) for 42N
-            erow = (int)((43 - coords[0]) * EPIX)
-            # col is 0 for 18 E, 1201 for 19 E
-            ecol = (int)((coords[1] - 18) * EPIX)
+
+            elev_row = (int)((43 - coords[0]) * elev_pix)
+
+            elev_col = (int)((coords[1] - 18) * elev_pix)
             try:
-                el = elevs[erow * EPIX + ecol]
+                el = elevs[elev_row * elev_pix + elev_col]
             except IndexError:
                 el = 0
             nodes[(int)(item.get('id'))] = Node((int)(item.get('id')), coords, el)
-        elif item.tag == 'way':
-            if item.get('id') == '157161112':  # main coastline way ID
-                for thing in item:
-                    if thing.tag == 'nd':
-                        coastnodes.append((int)(thing.get('ref')))
-                continue
-            useme = False
-            oneway = False
-            myname = 'unnamed way'
-            for thing in item:
-                if thing.tag == 'tag' and thing.get('k') == 'highway':
-                    useme = True
-                    mytype = thing.get('v')
-                if thing.tag == 'tag' and thing.get('k') == 'name':
-                    myname = thing.get('v')
-                if thing.tag == 'tag' and thing.get('k') == 'oneway':
-                    if thing.get('v') == 'yes':
-                        oneway = True
-            if useme:
-                wayid = (int)(item.get('id'))
-                ways[wayid] = Way(myname, mytype)
-                nlist = []
-                for thing in item:
-                    if thing.tag == 'nd':
-                        nlist.append((int)(thing.get('ref')))
-                thisn = nlist[0]
-                for n in range(len(nlist) - 1):
-                    nextn = nlist[n + 1]
-                    nodes[thisn].ways.append(Edge(ways[wayid], nodes[thisn], nodes[nextn]))
-                    thisn = nextn
-                if not oneway:
-                    thisn = nlist[-1]
-                    for n in range(len(nlist) - 2, -1, -1):
-                        nextn = nlist[n]
-                        nodes[thisn].ways.append(Edge(ways[wayid], nodes[thisn], nodes[nextn]))
-                        thisn = nextn
-                ways[wayid].nodes = nlist
-    print(len(coastnodes))
-    if len(coastnodes):
-        print(coastnodes[0])
-        print(nodes[coastnodes[0]])
-    return nodes, ways, coastnodes
 
-elevs = build_elevs("n41_w114_1arc_v2_bil/n41_w114_1arc_v2.bil")
-nodes, ways, coastnodes = build_graph(elevs)
-# nodes, ways = build_graph(elevs)
+        elif item.tag == 'way':
+
+            if item.get('id') == '157161112':  # main coastline way ID
+
+                for a in item:
+                    if a.tag == 'nd':
+                        coast_nodes.append((int)(a.get('ref')))
+
+                continue
+
+            use_path = False
+            one_way_path = False
+            path_name = 'unnamed way'
+
+            for a in item:
+
+                if a.tag == 'tag' and a.get('k') == 'highway':
+                    use_path = True
+                    mytype = a.get('v')
+
+                if a.tag == 'tag' and a.get('k') == 'name':
+                    path_name = a.get('v')
+
+                if a.tag == 'tag' and a.get('k') == 'one_way_path':
+                    if a.get('v') == 'yes':
+                        one_way_path = True
+
+            if use_path:
+                path_id = (int)(item.get('id'))
+                ways[path_id] = Way(path_name, mytype)
+                node_list = []
+
+                for a in item:
+                    if a.tag == 'nd':
+                        node_list.append((int)(a.get('ref')))
+
+                this_node = node_list[0]
+
+                for n in range(len(node_list) - 1):
+                    next_node = node_list[n + 1]
+                    nodes[this_node].ways.append(Edge(ways[path_id], nodes[this_node], nodes[next_node]))
+                    this_node = next_node
+
+                if not one_way_path:
+                    this_node = node_list[-1]
+
+                    for n in range(len(node_list) - 2, -1, -1):
+                        next_node = node_list[n]
+                        nodes[this_node].ways.append(Edge(ways[path_id], nodes[this_node], nodes[next_node]))
+                        this_node = next_node
+
+                ways[path_id].nodes = node_list
+
+    print(len(coast_nodes))
+
+    if len(coast_nodes):
+        print(coast_nodes[0])
+        print(nodes[coast_nodes[0]])
+
+    return nodes, ways, coast_nodes
+
+elevs = read_elevations("n41_w114_1arc_v2_bil/n41_w114_1arc_v2.bil")
+nodes, ways, coast_nodes = read_xml(elevs)
 
 master = Tk()
-thewin = PlanWin(master, nodes, ways, coastnodes, elevs)
+thewin = PlanWin(master, nodes, ways, coast_nodes, elevs)
 mainloop()
